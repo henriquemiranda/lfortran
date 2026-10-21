@@ -84,6 +84,21 @@ class ArrayVarAddressReplacer: public ASR::BaseExprReplacer<ArrayVarAddressRepla
     }
 
     void replace_ArrayItem(ASR::ArrayItem_t* x) {
+        // `a(v)` with a vector subscript `v` is an array. It is the array
+        // `v` that the loop indexes, to subscript `a` with one element of it.
+        if( ASRUtils::is_array_indexed_with_array_indices(x->m_args, x->n_args) ) {
+            ASR::expr_t** current_expr_copy = current_expr;
+            for( size_t i = 0; i < x->n_args; i++ ) {
+                if( x->m_args[i].m_left == nullptr && x->m_args[i].m_step == nullptr &&
+                    x->m_args[i].m_right != nullptr &&
+                    ASRUtils::is_array(ASRUtils::expr_type(x->m_args[i].m_right)) ) {
+                    current_expr = &(x->m_args[i].m_right);
+                    replace_expr(x->m_args[i].m_right);
+                }
+            }
+            current_expr = current_expr_copy;
+            return ;
+        }
         // `w%u(2)` with `w` an array is an array although its subscripts are
         // scalar: they select one element of the component out of every
         // element of the base, so the shape comes from the base. Descend
