@@ -22395,6 +22395,29 @@ public:
         return sym_scope;
     }
 
+    // A module procedure may call an external procedure with an implicit
+    // interface that happens to be defined in the same file. The ASR of a
+    // module cannot refer to a symbol of the global scope, since the module is
+    // saved on its own in a mod file, so such a call must go through an opaque
+    // procedure, like the call to any other external procedure.
+    bool is_global_procedure_called_from_module(ASR::symbol_t* sym) {
+        if (sym == nullptr || !ASR::is_a<ASR::Function_t>(*sym)) {
+            return false;
+        }
+        SymbolTable* parent = ASR::down_cast<ASR::Function_t>(sym)->m_symtab->parent;
+        if (parent == nullptr || parent->parent != nullptr) {
+            return false;
+        }
+        for (SymbolTable* s = current_scope; s; s = s->parent) {
+            if (s->asr_owner && ASR::is_a<ASR::symbol_t>(*s->asr_owner)
+                    && ASR::is_a<ASR::Module_t>(
+                        *ASR::down_cast<ASR::symbol_t>(s->asr_owner))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // A procedure with an implicit interface that is referenced but not
     // declared: an opaque procedure named `name`. It is created in the scope
     // of the reference, once, and never changed by later references.
@@ -23689,6 +23712,9 @@ public:
             v = current_scope->resolve_symbol("~" + var_name);
             if (!v) {
                 v = current_scope->resolve_symbol(var_name);
+                if (is_global_procedure_called_from_module(v)) {
+                    v = nullptr;
+                }
             }
         }
         if (compiler_options.implicit_interface && !is_external_procedure

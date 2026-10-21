@@ -9122,6 +9122,9 @@ public:
                 original_sym, current_scope);
         } else {
             original_sym = current_scope->resolve_symbol(sub_name);
+            if (is_global_procedure_called_from_module(original_sym)) {
+                original_sym = nullptr;
+            }
         }
         if (original_sym && is_external) {
             ASR::symbol_t* sym_past_external = ASRUtils::symbol_get_past_external(original_sym);
