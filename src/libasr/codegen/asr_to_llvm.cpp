@@ -8498,8 +8498,38 @@ public:
         llvm::Type* llvm_data_type = llvm_utils->get_el_type(expr, asr_data_type, module.get());
         llvm::Value* ptr_ = nullptr;
         bool pointer_null_array_init = has_pointer_null_array_initializer(expr);
+        // The descriptor of an allocatable array that is saved is a global,
+        // set up when the procedure is entered the first time: the array
+        // keeps its allocation, and its descriptor, from one call to the next.
+        llvm::BasicBlock* save_cont_bb = nullptr;
+        std::string save_desc_name;
+        if( is_malloc_array_type && !is_list && !is_data_only &&
+                ASR::is_a<ASR::Var_t>(*expr) ) {
+            ASR::symbol_t* var_sym = ASRUtils::symbol_get_past_external(
+                ASR::down_cast<ASR::Var_t>(expr)->m_v);
+            if( ASR::is_a<ASR::Variable_t>(*var_sym) &&
+                    ASR::down_cast<ASR::Variable_t>(var_sym)->m_storage ==
+                        ASR::storage_typeType::Save ) {
+                llvm::GlobalVariable* gptr = llvm::dyn_cast<llvm::GlobalVariable>(ptr);
+                if( gptr ) {
+                    save_desc_name = std::string(gptr->getName()) + ".desc";
+                    llvm::Function* fn = builder->GetInsertBlock()->getParent();
+                    llvm::BasicBlock* init_bb = llvm::BasicBlock::Create(context, "save_desc_init", fn);
+                    save_cont_bb = llvm::BasicBlock::Create(context, "save_desc_done", fn);
+                    llvm::Value* current = builder->CreateLoad(type_->getPointerTo(), ptr);
+                    builder->CreateCondBr(builder->CreateIsNull(current), init_bb, save_cont_bb);
+                    builder->SetInsertPoint(init_bb);
+                }
+            }
+        }
         if( is_malloc_array_type && !is_list && !is_data_only ) {
-            ptr_ = arr_descr->create_descriptor_alloca(type_, "arr_desc");
+            if( save_cont_bb ) {
+                ptr_ = new llvm::GlobalVariable(*module, type_, false,
+                    llvm::GlobalValue::InternalLinkage,
+                    llvm::Constant::getNullValue(type_), save_desc_name);
+            } else {
+                ptr_ = arr_descr->create_descriptor_alloca(type_, "arr_desc");
+            }
             if(ASRUtils::is_character(*m_type)){
                 if (pointer_null_array_init) {
                     arr_descr->reset_is_allocated_flag(type_, ptr_, llvm_data_type);
@@ -8565,6 +8595,10 @@ public:
         }
         if( ptr_ ) {
             LLVM::CreateStore(*builder, ptr_, ptr);
+        }
+        if( save_cont_bb ) {
+            builder->CreateBr(save_cont_bb);
+            builder->SetInsertPoint(save_cont_bb);
         }
     }
     
